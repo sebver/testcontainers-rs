@@ -49,6 +49,7 @@ impl Default for Http {
 impl Http {
     pub async fn run<I: Image>(&self, image: impl Into<RunnableImage<I>>) -> ContainerAsync<'_, I> {
         let image = image.into();
+
         let mut create_options: Option<CreateContainerOptions<String>> = None;
         let mut config: Config<String> = Config {
             image: Some(image.descriptor()),
@@ -88,12 +89,16 @@ impl Http {
         config.env = Some(envs);
 
         // volumes
-        let vols: HashMap<String, HashMap<(), ()>> = image
+        let vols: Vec<String> = image
             .volumes()
             .into_iter()
-            .map(|(orig, dest)| (format!("{}:{}", orig, dest), HashMap::new()))
+            .map(|(orig, dest)| format!("{}:{}", orig, dest))
             .collect();
-        config.volumes = Some(vols);
+
+        config.host_config = config.host_config.map(|mut host_config| {
+            host_config.binds = Some(vols);
+            host_config
+        });
 
         // entrypoint
         if let Some(entrypoint) = image.entrypoint() {
@@ -126,6 +131,14 @@ impl Http {
                 });
             }
         } else {
+            config.exposed_ports = Some(HashMap::new());
+            config.exposed_ports = config.exposed_ports.map(|mut ep| {
+                for p in image.expose_ports() {
+                    ep.insert(format!("{}/tcp", p), HashMap::new());
+                }
+                ep
+            });
+
             config.host_config = config.host_config.map(|mut host_config| {
                 host_config.publish_all_ports = Some(true);
                 host_config
